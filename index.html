@@ -1,710 +1,866 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
-<meta charset="utf-8">
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>HyperTX Optimal v4.0 — 5-Engine Prediction</title>
-<meta name="theme-color" content="#050507">
+<title>HyperTX Optimal v4.1 - Tài Xỉu Pure</title>
 <style>
-:root{
-  --bg:#050507;
-  --bg2:#0a0b0f;
-  --surface:#11121a;
-  --surface2:#171923;
-  --surface3:#1c2030;
-  --border:#232838;
-  --border2:#2e3650;
-  --text:#eef0f7;
-  --text2:#a8b0c3;
-  --text3:#6b7288;
-  --gold:#f5c542;
-  --gold2:#d4a017;
-  --gold3:#8a6a12;
-  --green:#22c55e;
-  --amber:#f59e0b;
-  --red:#ef4444;
-  --blue:#3b82f6;
-  --shadow:0 10px 40px rgba(0,0,0,.5);
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  background:#050507;
+  color:#fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
 }
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{height:100%}
-body{
-  margin:0; background:var(--bg); color:var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial;
-  -webkit-font-smoothing:antialiased; overflow-x:hidden;
-  background-image: 
-    radial-gradient(800px 400px at 80% -10%, rgba(245,197,66,.12), transparent 60%),
-    radial-gradient(600px 300px at 10% 0%, rgba(59,130,246,.08), transparent 50%),
-    linear-gradient(180deg, var(--bg), var(--bg2) 40%, var(--bg));
+body::before {
+  content:'';
+  position:fixed;
+  inset:0;
+  background:
+    radial-gradient(ellipse 800px 400px at 50% -5%, rgba(212,175,55,0.28), transparent 60%),
+    radial-gradient(ellipse 600px 300px at 50% 0%, rgba(212,175,55,0.15), transparent 70%),
+    #050507;
+  pointer-events:none;
+  z-index:0;
 }
-.wrap{max-width:1140px; margin:0 auto; padding:14px 14px 80px}
+.app { max-width:480px; margin:0 auto; padding:16px 16px 110px; position:relative; z-index:1; }
+.glass {
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(212,175,55,0.2);
+  backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);
+  border-radius:20px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 30px rgba(0,0,0,0.4);
+}
+header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:22px; padding-top:8px; }
+.title h1 { color:#d4af37; font-size:22px; font-weight:800; letter-spacing:-0.3px; text-shadow:0 0 20px rgba(212,175,55,0.3); }
+.title p { margin-top:4px; color:rgba(255,255,255,0.58); font-size:12px; font-weight:500; }
+.clock-wrap { text-align:right; }
+.live { display:flex; align-items:center; gap:6px; justify-content:flex-end; font-size:11px; font-weight:700; color:#d4af37; letter-spacing:0.5px; margin-bottom:4px; }
+.dot { width:8px; height:8px; background:#d4af37; border-radius:50%; animation:pulse 1.6s infinite; box-shadow:0 0 12px rgba(212,175,55,0.9); }
+@keyframes pulse { 0%,100%{ transform:scale(1); opacity:1 } 50%{ transform:scale(0.85); opacity:0.6 } }
+.time { font-variant-numeric:tabular-nums; font-size:19px; font-weight:600; color:#fff; }
 
-/* Header */
-.top{
-  position:sticky; top:0; z-index:40; backdrop-filter: blur(12px);
-  background:linear-gradient(180deg, rgba(5,5,7,.9), rgba(5,5,7,.6) 70%, transparent);
-  margin:-14px -14px 12px; padding:14px; display:flex; align-items:center; justify-content:space-between;
-  border-bottom:1px solid rgba(255,255,255,.04);
-}
-.brand{display:flex; gap:12px; align-items:center}
-.logo{
-  width:40px; height:40px; border-radius:12px; position:relative; isolation:isolate;
-  background: radial-gradient(120% 120% at 30% 20%, #2a2412, #0c0d12 60%);
-  border:1px solid var(--border2); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 6px 18px rgba(0,0,0,.4);
-  display:grid; place-items:center; overflow:hidden;
-}
-.logo::before{
-  content:""; position:absolute; inset:-1px; background:
-   conic-gradient(from 210deg, transparent 0 60%, rgba(245,197,66,.35) 70%, transparent 85%);
-  filter:blur(8px); z-index:-1;
-}
-.logo svg{width:24px;height:24px}
-.brand h1{font-size:17px; line-height:1; margin:0; font-weight:800; letter-spacing:.3px}
-.brand h1 span{
-  background:linear-gradient(90deg, var(--gold), #ffe29a 40%, var(--gold2));
-  -webkit-background-clip:text; background-clip:text; color:transparent; font-weight:900
-}
-.brand p{margin:2px 0 0; font-size:10px; color:var(--text3); letter-spacing:.18em; font-weight:600}
-.clock{text-align:right}
-#currentTime{font-variant-numeric:tabular-nums; font-weight:700; font-size:18px; letter-spacing:.5px}
-#currentDate{font-size:11px; color:var(--text2); margin-top:2px}
-.status{display:inline-flex; align-items:center; gap:6px; margin-top:4px; padding:3px 8px; border-radius:999px; background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.25); color:#86efac; font-size:10px; font-weight:700; letter-spacing:.05em}
-.status .dot{width:6px;height:6px;border-radius:50%;background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite}
+.stats { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
+.stat-card { padding:14px 15px; transition:transform .2s; }
+.stat-card:active { transform:scale(0.98); }
+.stat-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.stat-icon { width:28px; height:28px; border-radius:9px; background:rgba(212,175,55,0.14); display:flex; align-items:center; justify-content:center; font-size:14px; border:1px solid rgba(212,175,55,0.2); }
+.stat-value { font-size:26px; font-weight:800; line-height:1; letter-spacing:-0.5px; }
+.stat-label { font-size:11px; color:rgba(255,255,255,0.55); margin-top:5px; font-weight:500; }
+.stat-sub { font-size:10px; color:#d4af37; font-weight:600; background:rgba(212,175,55,0.1); padding:3px 7px; border-radius:6px; border:1px solid rgba(212,175,55,0.2); }
 
-/* Stats */
-.stats{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:10px 0 14px}
-@media(min-width:760px){.stats{grid-template-columns:repeat(4,1fr)}}
-.stat{
-  background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
-  border:1px solid var(--border); border-radius:16px; padding:12px 13px; position:relative; overflow:hidden;
-}
-.stat::after{content:""; position:absolute; right:-20px; top:-20px; width:80px; height:80px; background:radial-gradient(closest-side, rgba(245,197,66,.18), transparent); filter:blur(10px)}
-.stat .label{font-size:10px; color:var(--text3); letter-spacing:.12em; font-weight:700; text-transform:uppercase}
-.stat .value{font-size:22px; font-weight:800; margin-top:4px; letter-spacing:.3px}
-.stat .sub{font-size:11px; color:var(--text2); margin-top:2px}
-.stat.gold{border-color:rgba(245,197,66,.35); box-shadow:0 0 0 1px rgba(245,197,66,.08) inset}
+.control-card { padding:18px; margin-bottom:20px; }
+.control-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.control-title { font-weight:700; font-size:14px; letter-spacing:0.2px; }
+.threshold-value { color:#d4af37; font-weight:800; font-size:22px; text-shadow:0 0 15px rgba(212,175,55,0.4); }
+input[type=range] { -webkit-appearance:none; width:100%; height:6px; background:linear-gradient(to right, rgba(212,175,55,0.3), rgba(212,175,55,0.1)); border-radius:3px; outline:none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:24px; height:24px; border-radius:50%; background:radial-gradient(circle, #f0d78a, #d4af37); cursor:pointer; box-shadow:0 0 18px rgba(212,175,55,0.6), inset 0 1px 2px rgba(255,255,255,0.4); border:2px solid #050507; margin-top:-9px; }
+input[type=range]::-moz-range-thumb { width:24px; height:24px; border-radius:50%; background:#d4af37; cursor:pointer; border:2px solid #050507; box-shadow:0 0 18px rgba(212,175,55,0.6); }
+input[type=range]:disabled { opacity:0.5; }
+.slider-labels { display:flex; justify-content:space-between; font-size:10.5px; color:rgba(255,255,255,0.5); margin-top:10px; font-weight:500; }
+.night-toggle { display:flex; justify-content:space-between; align-items:center; margin-top:18px; padding-top:16px; border-top:1px solid rgba(212,175,55,0.12); }
+.toggle-label { font-size:13.5px; font-weight:600; }
+.toggle-desc { font-size:11px; color:rgba(255,255,255,0.5); margin-top:2px; }
+.switch { position:relative; width:48px; height:28px; flex-shrink:0; }
+.switch input { opacity:0; width:0; height:0; }
+.slider-switch { position:absolute; inset:0; background:rgba(255,255,255,0.12); border-radius:28px; transition:.3s; border:1px solid rgba(255,255,255,0.08); }
+.slider-switch:before { content:''; position:absolute; height:22px; width:22px; left:2px; bottom:2px; background:white; border-radius:50%; transition:.3s cubic-bezier(0.23,1,0.32,1); box-shadow:0 2px 6px rgba(0,0,0,0.3); }
+input:checked + .slider-switch { background:linear-gradient(135deg, #d4af37, #b8941f); border-color:rgba(212,175,55,0.5); }
+input:checked + .slider-switch:before { transform:translateX(20px); }
 
-/* Controls */
-.controls{
-  background:linear-gradient(180deg, var(--surface), var(--surface2));
-  border:1px solid var(--border); border-radius:18px; padding:14px; box-shadow:var(--shadow);
-}
-.control-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px}
-.control-title{font-weight:800; letter-spacing:.02em; display:flex; align-items:center; gap:8px}
-.badge{font-size:10px; padding:3px 7px; border-radius:999px; background:rgba(245,197,66,.12); border:1px solid rgba(245,197,66,.3); color:var(--gold); font-weight:800; letter-spacing:.06em}
-.threshold-wrap{margin:12px 0 6px}
-.threshold-row{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px}
-.threshold-label{font-size:12px; color:var(--text2); font-weight:600; letter-spacing:.04em}
-#thresholdValue{font-variant-numeric:tabular-nums; font-weight:800; color:var(--gold)}
-input[type="range"]{
-  -webkit-appearance:none; width:100%; height:32px; background:transparent; margin:0;
-}
-input[type="range"]::-webkit-slider-runnable-track{
-  height:8px; border-radius:99px; background:linear-gradient(90deg, var(--surface3), var(--surface3));
-  border:1px solid var(--border2); position:relative;
-}
-input[type="range"]::-webkit-slider-runnable-track::before{content:""}
-input[type="range"]::-webkit-slider-thumb{
-  -webkit-appearance:none; margin-top:-7px; width:22px; height:22px; border-radius:50%;
-  background: radial-gradient(circle at 30% 30%, #fff6d5, var(--gold)); border:2px solid #1a1405;
-  box-shadow:0 2px 8px rgba(245,197,66,.5), 0 0 0 4px rgba(245,197,66,.15);
-}
-input[type="range"]::-moz-range-track{height:8px; border-radius:99px; background:var(--surface3); border:1px solid var(--border2)}
-input[type="range"]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--gold);border:2px solid #1a1405;box-shadow:0 2px 8px rgba(245,197,66,.5)}
-.threshold-scale{display:flex; justify-content:space-between; font-size:10px; color:var(--text3); margin-top:4px; padding:0 2px}
-.switch-row{display:flex; align-items:center; justify-content:space-between; margin-top:12px; padding-top:12px; border-top:1px dashed var(--border)}
-.switch{display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none}
-.switch input{display:none}
-.switch .track{width:40px; height:24px; border-radius:999px; background:var(--surface3); border:1px solid var(--border2); position:relative; transition:.2s}
-.switch .thumb{position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:#777; transition:.2s}
-.switch input:checked + .track{background:rgba(245,197,66,.2); border-color:rgba(245,197,66,.5)}
-.switch input:checked + .track .thumb{left:18px; background:var(--gold); box-shadow:0 0 10px rgba(245,197,66,.6)}
-.switch-label{font-size:12px; color:var(--text2); font-weight:600}
+.engines-wrap { margin-bottom:20px; }
+.section-title { font-size:13px; font-weight:700; color:rgba(255,255,255,0.9); margin-bottom:12px; display:flex; align-items:center; gap:7px; letter-spacing:0.3px; }
+.engines-scroll { display:flex; gap:10px; overflow-x:auto; padding:2px 2px 10px; scrollbar-width:none; scroll-snap-type:x mandatory; }
+.engines-scroll::-webkit-scrollbar { display:none; }
+.engine-card { min-width:122px; padding:13px 12px; flex-shrink:0; scroll-snap-align:start; transition:transform .2s, border-color .2s; }
+.engine-card:hover { transform:translateY(-2px); border-color:rgba(212,175,55,0.4); }
+.engine-name { font-size:11px; color:#d4af37; font-weight:700; margin-bottom:6px; letter-spacing:0.3px; text-transform:uppercase; }
+.engine-value { font-size:22px; font-weight:800; color:white; line-height:1; }
+.engine-status { font-size:10px; color:rgba(255,255,255,0.55); margin-top:5px; font-weight:600; }
 
-/* Engines */
-.engines-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-top:12px}
-.eng{
-  background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:8px 6px; text-align:center;
-  cursor:pointer; transition:.15s; user-select:none
-}
-.eng.active{border-color:rgba(245,197,66,.45); background:linear-gradient(180deg, rgba(245,197,66,.12), rgba(245,197,66,.04)); box-shadow:0 0 0 1px rgba(245,197,66,.15) inset}
-.eng .name{font-size:10px; font-weight:800; letter-spacing:.06em}
-.eng .sub{font-size:9px; color:var(--text3); margin-top:2px}
-.eng .dot{width:6px;height:6px;border-radius:50%;background:#444; margin:4px auto 0; transition:.2s}
-.eng.active .dot{background:var(--gold); box-shadow:0 0 8px rgba(245,197,66,.7)}
+.input-card { padding:20px; margin-bottom:20px; }
+.dice-row { display:flex; gap:12px; justify-content:center; margin:18px 0 20px; }
+.dice-box { width:90px; height:90px; background:rgba(0,0,0,0.5); border:2px solid rgba(212,175,55,0.25); border-radius:18px; display:flex; align-items:center; justify-content:center; font-size:44px; font-weight:800; color:#d4af37; transition:all .25s cubic-bezier(0.23,1,0.32,1); cursor:pointer; position:relative; overflow:hidden; }
+.dice-box::after { content:''; position:absolute; inset:0; background:radial-gradient(circle at 50% 30%, rgba(212,175,55,0.2), transparent 60%); opacity:0; transition:.3s; }
+.dice-box.active { border-color:#d4af37; box-shadow:0 0 28px rgba(212,175,55,0.35), inset 0 0 20px rgba(212,175,55,0.12); transform:translateY(-2px) scale(1.03); }
+.dice-box.active::after { opacity:1; }
+.dice-box.filled { background:rgba(212,175,55,0.08); color:#f0d78a; }
+.numpad { display:grid; grid-template-columns:repeat(6,1fr); gap:9px; margin-bottom:14px; }
+.num-btn { height:50px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:13px; color:white; font-size:21px; font-weight:700; cursor:pointer; transition:.15s; }
+.num-btn:active { transform:scale(0.92); background:rgba(212,175,55,0.25); border-color:#d4af37; }
+.samples { display:flex; gap:8px; margin-bottom:16px; }
+.sample-btn { flex:1; height:40px; background:rgba(212,175,55,0.08); border:1px solid rgba(212,175,55,0.25); border-radius:11px; color:#d4af37; font-size:12.5px; font-weight:600; cursor:pointer; transition:.2s; }
+.sample-btn:active { transform:scale(0.97); background:rgba(212,175,55,0.15); }
+.analyze-btn { width:100%; height:56px; background:linear-gradient(135deg,#d4af37 0%,#f0d78a 45%,#d4af37 100%); border:none; border-radius:16px; color:#050507; font-size:16px; font-weight:800; cursor:pointer; box-shadow:0 10px 30px rgba(212,175,55,0.35), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); transition:.25s; text-transform:uppercase; letter-spacing:0.8px; position:relative; overflow:hidden; }
+.analyze-btn::after { content:''; position:absolute; top:0; left:-100%; width:100%; height:100%; background:linear-gradient(90deg,transparent,rgba(255,255,255,0.4),transparent); transition:.6s; }
+.analyze-btn:active { transform:translateY(2px); box-shadow:0 5px 15px rgba(212,175,55,0.3); }
+.analyze-btn:active::after { left:100%; }
 
-/* Filters */
-.filters{display:flex; gap:8px; overflow:auto; padding:12px 2px 4px; margin:6px 0; scrollbar-width:none}
-.filters::-webkit-scrollbar{display:none}
-.chip{
-  flex:0 0 auto; padding:8px 12px; border-radius:999px; font-size:12px; font-weight:700; letter-spacing:.02em;
-  background:var(--surface2); border:1px solid var(--border); color:var(--text2); cursor:pointer; white-space:nowrap; transition:.15s
-}
-.chip.active{background:rgba(245,197,66,.14); border-color:rgba(245,197,66,.45); color:var(--gold); box-shadow:0 0 0 1px rgba(245,197,66,.1) inset}
-.chip .count{opacity:.7; margin-left:4px; font-weight:600}
+.prediction-card { padding:30px 20px 26px; text-align:center; margin-bottom:20px; position:relative; overflow:hidden; }
+.prediction-card::before { content:''; position:absolute; top:-50%; left:-50%; width:200%; height:200%; background:conic-gradient(from 0deg, transparent 0deg, rgba(212,175,55,0.18) 90deg, transparent 180deg); animation:rotate 5s linear infinite; opacity:0; transition:opacity .6s; }
+.prediction-card.active::before { opacity:1; }
+@keyframes rotate { to { transform:rotate(360deg) } }
+.circle-wrap { position:relative; width:200px; height:200px; margin:0 auto 22px; }
+.circle-bg { fill:none; stroke:rgba(255,255,255,0.07); stroke-width:14; }
+.circle-progress { fill:none; stroke:url(#goldGrad); stroke-width:14; stroke-linecap:round; transform:rotate(-90deg); transform-origin:50% 50%; transition:stroke-dashoffset 1.2s cubic-bezier(0.23,1,0.32,1); filter:drop-shadow(0 0 14px rgba(212,175,55,0.5)); }
+.circle-text { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); }
+.circle-percent { font-size:52px; font-weight:900; color:#fff; line-height:1; letter-spacing:-1px; }
+.circle-label { font-size:11px; color:rgba(255,255,255,0.6); margin-top:6px; text-transform:uppercase; letter-spacing:1.2px; font-weight:600; }
+.prediction-result { font-size:44px; font-weight:900; margin:8px 0 6px; letter-spacing:2px; transition:all .4s; }
+.result-tai { color:#d4af37; text-shadow:0 0 35px rgba(212,175,55,0.7), 0 0 70px rgba(212,175,55,0.4); }
+.result-xiu { color:#8fa4ff; text-shadow:0 0 35px rgba(143,164,255,0.7), 0 0 70px rgba(143,164,255,0.4); }
+.result-wait { color:rgba(255,255,255,0.28); font-size:28px; letter-spacing:1px; }
+.prediction-meta { display:flex; justify-content:center; gap:26px; margin-top:14px; font-size:12.5px; color:rgba(255,255,255,0.65); }
+.meta-item strong { color:#d4af37; font-weight:800; }
 
-/* Top picks */
-.top-picks{margin:14px 0 8px}
-.section-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px}
-.section-head h2{margin:0; font-size:14px; letter-spacing:.08em; text-transform:uppercase; color:var(--text2); font-weight:800}
-.picks-row{display:grid; grid-auto-flow:column; grid-auto-columns:85%; gap:10px; overflow:auto; padding-bottom:4px; scroll-snap-type:x mandatory}
-@media(min-width:760px){.picks-row{grid-auto-columns:32%}}
-.pick-card{
-  scroll-snap-align:start; background: linear-gradient(180deg, rgba(245,197,66,.14), rgba(245,197,66,.04));
-  border:1px solid rgba(245,197,66,.35); border-radius:16px; padding:12px; position:relative; overflow:hidden; cursor:pointer
-}
-.pick-card::before{content:""; position:absolute; inset:-1px; background:linear-gradient(90deg, transparent, rgba(245,197,66,.2), transparent); transform:translateX(-100%); animation:shine 3s infinite}
-.pick-top{display:flex; align-items:center; justify-content:space-between}
-.pick-league{font-size:10px; color:#e7d199; font-weight:700; letter-spacing:.06em}
-.pick-conf{font-size:11px; font-weight:800; color:#111; background:var(--gold); padding:2px 6px; border-radius:6px}
-.pick-match{margin:8px 0 6px; font-weight:800; letter-spacing:.2px}
-.pick-edge{font-size:12px; color:#ffe7a3}
+.filters-card { padding:18px; margin-bottom:20px; }
+.filter-row { display:flex; justify-content:space-between; align-items:center; padding:13px 0; border-bottom:1px solid rgba(255,255,255,0.06); }
+.filter-row:last-child { border-bottom:none; }
+.filter-info { display:flex; align-items:center; gap:11px; }
+.filter-icon { width:34px; height:34px; border-radius:10px; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:15px; border:1px solid rgba(255,255,255,0.08); }
+.filter-name { font-size:13.5px; font-weight:600; letter-spacing:0.1px; }
+.filter-desc { font-size:11px; color:rgba(255,255,255,0.5); margin-top:2px; }
+.filter-status { font-size:11px; padding:5px 11px; border-radius:20px; font-weight:700; letter-spacing:0.3px; text-transform:uppercase; }
+.status-on { background:rgba(34,197,94,0.18); color:#4ade80; border:1px solid rgba(34,197,94,0.35); box-shadow:0 0 12px rgba(34,197,94,0.2); }
+.status-off { background:rgba(255,255,255,0.07); color:rgba(255,255,255,0.55); border:1px solid rgba(255,255,255,0.12); }
+.status-warn { background:rgba(212,175,55,0.18); color:#d4af37; border:1px solid rgba(212,175,55,0.35); box-shadow:0 0 12px rgba(212,175,55,0.2); }
 
-/* Games */
-.games{display:grid; grid-template-columns:1fr; gap:10px; margin-top:8px}
-@media(min-width:900px){.games{grid-template-columns:1fr 1fr}}
-.game{
-  background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015));
-  border:1px solid var(--border); border-radius:18px; padding:13px; position:relative; overflow:hidden; transition:.18s; cursor:pointer
-}
-.game:hover{transform:translateY(-1px); border-color:var(--border2); box-shadow:0 8px 24px rgba(0,0,0,.35)}
-.game.elite{border-color:rgba(245,197,66,.45); box-shadow:0 0 0 1px rgba(245,197,66,.12) inset, 0 10px 30px rgba(245,197,66,.08)}
-.game-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px}
-.league-pill{display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:800; letter-spacing:.06em; color:#c7d2fe; background:rgba(59,130,246,.12); border:1px solid rgba(59,130,246,.25); padding:4px 8px; border-radius:999px; text-transform:uppercase}
-.time-pill{font-size:11px; font-weight:700; color:var(--text2); background:var(--surface3); border:1px solid var(--border); padding:4px 8px; border-radius:999px; font-variant-numeric:tabular-nums}
-.time-pill.live{color:#86efac; background:rgba(34,197,94,.1); border-color:rgba(34,197,94,.3)}
-.time-pill.live::before{content:""; display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--green); margin-right:6px; box-shadow:0 0 6px var(--green); animation:pulse 1.6s infinite}
-.time-pill.soon{color:#fde68a; background:rgba(245,158,11,.1); border-color:rgba(245,158,11,.28)}
-.match{display:grid; grid-template-columns:1fr auto 1fr; gap:10px; align-items:center; margin:6px 0 10px}
-.team{display:flex; align-items:center; gap:8px; min-width:0}
-.team.away{justify-content:flex-end; text-align:right}
-.crest{width:28px;height:28px;border-radius:9px; display:grid; place-items:center; font-weight:900; font-size:12px; color:#0b0c10; background:linear-gradient(180deg, #cbd5e1, #94a3b8); border:1px solid rgba(255,255,255,.2); flex:0 0 auto}
-.team span{font-weight:750; letter-spacing:.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.vs{font-size:11px; color:var(--text3); font-weight:800; padding:4px 8px; border:1px dashed var(--border); border-radius:8px; background:rgba(255,255,255,.02)}
-.engine-bar{display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,.25); border:1px solid var(--border); border-radius:12px; padding:8px 10px; margin-bottom:10px}
-.dots{display:flex; gap:5px}
-.dot-e{width:18px; height:8px; border-radius:4px; background:#2a2f42; border:1px solid #1c2133; position:relative}
-.dot-e.on{background:linear-gradient(180deg, var(--gold), var(--gold2)); border-color:var(--gold3); box-shadow:0 0 10px rgba(245,197,66,.35)}
-.dot-e.on::after{content:""; position:absolute; inset:0; background:linear-gradient(90deg, transparent, rgba(255,255,255,.5), transparent); animation:shine 2.5s infinite}
-.consensus{font-size:11px; font-weight:800; letter-spacing:.04em; color:var(--text2)}
-.consensus strong{color:var(--gold)}
-.prediction{display:flex; align-items:center; justify-content:space-between; gap:10px}
-.pick-main .pick{font-size:15px; font-weight:900; letter-spacing:.3px}
-.pick-main .conf{font-size:11px; color:var(--text2); margin-top:2px}
-.edge{font-size:12px; font-weight:900; padding:6px 9px; border-radius:10px; border:1px solid; white-space:nowrap}
-.edge.pos{color:#86efac; background:rgba(34,197,94,.1); border-color:rgba(34,197,94,.3)}
-.edge.mid{color:#fde68a; background:rgba(245,158,11,.1); border-color:rgba(245,158,11,.3)}
-.edge.low{color:#cbd5e1; background:rgba(148,163,184,.1); border-color:rgba(148,163,184,.25)}
-.odds-strip{display:flex; gap:8px; margin-top:10px; padding-top:10px; border-top:1px dashed var(--border)}
-.odd{flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:6px 8px; text-align:center}
-.odd .k{font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:.06em}
-.odd .v{font-size:13px; font-weight:800; margin-top:2px; font-variant-numeric:tabular-nums}
+.history-card { padding:18px; }
+.history-list { max-height:320px; overflow-y:auto; margin-top:4px; scrollbar-width:thin; }
+.history-list::-webkit-scrollbar { width:4px; }
+.history-list::-webkit-scrollbar-thumb { background:rgba(212,175,55,0.3); border-radius:2px; }
+.history-item { display:flex; justify-content:space-between; align-items:center; padding:12px 13px; background:rgba(255,255,255,0.03); border-radius:13px; margin-bottom:8px; border:1px solid rgba(255,255,255,0.06); transition:.2s; }
+.history-item:hover { background:rgba(255,255,255,0.05); border-color:rgba(212,175,55,0.2); }
+.history-left { display:flex; align-items:center; gap:12px; }
+.history-dice { font-size:13px; font-family:ui-monospace,SFMono-Regular,monospace; color:rgba(255,255,255,0.7); background:rgba(0,0,0,0.3); padding:4px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
+.history-pred { font-weight:800; font-size:14px; letter-spacing:0.5px; }
+.pred-tai { color:#d4af37; }
+.pred-xiu { color:#8fa4ff; }
+.history-right { text-align:right; }
+.history-conf { font-size:13.5px; font-weight:700; color:white; }
+.history-time { font-size:10.5px; color:rgba(255,255,255,0.45); margin-top:2px; }
 
-/* Modal */
-.modal-backdrop{position:fixed; inset:0; background:rgba(3,5,8,.75); backdrop-filter:blur(8px); display:none; align-items:flex-end; justify-content:center; z-index:60; padding:14px}
-.modal-backdrop.open{display:flex}
-.modal-card{width:100%; max-width:560px; background:linear-gradient(180deg, var(--surface), #0e111b); border:1px solid var(--border2); border-radius:20px 20px 16px 16px; box-shadow:var(--shadow); max-height:86vh; overflow:auto; position:relative}
-.modal-head{position:sticky; top:0; background:linear-gradient(180deg, rgba(14,17,27,.95), rgba(14,17,27,.8)); backdrop-filter: blur(6px); padding:14px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; z-index:2}
-.modal-title{font-weight:900; letter-spacing:.3px}
-.close{width:32px; height:32px; border-radius:10px; background:var(--surface3); border:1px solid var(--border); color:var(--text2); font-size:20px; display:grid; place-items:center; cursor:pointer}
-.modal-body{padding:14px}
-.eng-table{display:grid; gap:8px}
-.eng-row{display:grid; grid-template-columns:1.1fr .7fr .6fr; gap:8px; align-items:center; background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:10px}
-.eng-row .en{font-weight:800; font-size:13px}
-.eng-row .en small{display:block; font-size:10px; color:var(--text3); font-weight:600; margin-top:2px}
-.eng-row .pk{font-size:12px; font-weight:800; text-align:center; padding:4px 6px; border-radius:8px; background:rgba(255,255,255,.04); border:1px solid var(--border)}
-.eng-row .cf{font-size:12px; font-weight:800; text-align:right; font-variant-numeric:tabular-nums; color:var(--gold)}
-
-/* Footer */
-footer{margin:28px 0 10px; text-align:center; color:var(--text3); font-size:11px}
-footer a{color:var(--text2); text-decoration:none}
-
-/* Utils */
-.empty{margin:24px 0; text-align:center; color:var(--text3); background:var(--surface2); border:1px dashed var(--border); border-radius:16px; padding:24px}
-.skeleton{height:110px; border-radius:16px; background:linear-gradient(90deg, #11131c 25%, #171b27 37%, #11131c 63%); background-size:400% 100%; animation:shimmer 1.4s infinite}
-@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
-@keyframes pulse{0%,100%{opacity:1; transform:scale(1)}50%{opacity:.6; transform:scale(.92)}}
-@keyframes shine{0%{transform:translateX(-100%)}60%,100%{transform:translateX(200%)}}
+.bottom-nav { position:fixed; bottom:0; left:0; right:0; background:rgba(5,5,7,0.85); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); border-top:1px solid rgba(212,175,55,0.18); z-index:100; }
+.nav-inner { max-width:480px; margin:0 auto; display:flex; justify-content:space-around; padding:10px 16px calc(10px + env(safe-area-inset-bottom)); }
+.nav-item { display:flex; flex-direction:column; align-items:center; gap:4px; color:rgba(255,255,255,0.5); font-size:11px; cursor:pointer; transition:.25s; padding:8px 18px; border-radius:13px; font-weight:600; }
+.nav-item.active { color:#d4af37; background:rgba(212,175,55,0.12); box-shadow:inset 0 0 0 1px rgba(212,175,55,0.2); }
+.nav-icon { font-size:20px; line-height:1; }
+.view { display:none; }
+.view.active { display:block; animation:fadeIn .3s; }
+@keyframes fadeIn { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <div class="brand">
-      <div class="logo" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M12 2l7 4v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-4z" stroke="#f5c542" stroke-width="1.5" fill="rgba(245,197,66,.12)"/>
-          <path d="M8 12l2.5 2.5 5-5" stroke="#f5c542" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
-      </div>
-      <div>
-        <h1>HyperTX Optimal <span>v4.0</span></h1>
-        <p>5-ENGINE REMASTERED</p>
-      </div>
+<div class="app">
+  <header>
+    <div class="title">
+      <h1>HyperTX Optimal v4.1</h1>
+      <p>Tài Xỉu Pure • Sunwin | Go88</p>
     </div>
-    <div class="clock">
-      <div id="currentTime">--:--</div>
-      <div id="currentDate">---</div>
-      <div class="status"><span class="dot"></span> MARKETS LIVE</div>
+    <div class="clock-wrap">
+      <div class="live"><span class="dot"></span>LIVE</div>
+      <div class="time" id="clock">00:00:00</div>
     </div>
   </header>
 
-  <section class="stats">
-    <div class="stat gold">
-      <div class="label">Total Games</div>
-      <div class="value" id="statTotal">132</div>
-      <div class="sub">Preloaded dataset</div>
-    </div>
-    <div class="stat">
-      <div class="label">High Confidence</div>
-      <div class="value" id="statHigh">--</div>
-      <div class="sub">≥70% consensus</div>
-    </div>
-    <div class="stat">
-      <div class="label">Avg Edge</div>
-      <div class="value" id="statEdge">--%</div>
-      <div class="sub">vs market</div>
-    </div>
-    <div class="stat">
-      <div class="label">Active Engines</div>
-      <div class="value" id="statEngines">5/5</div>
-      <div class="sub">All systems nominal</div>
-    </div>
-  </section>
-
-  <section class="controls">
-    <div class="control-head">
-      <div class="control-title">Adaptive Threshold <span class="badge">60–72%</span></div>
-      <div class="switch-label" style="font-size:11px; color:var(--text3)">Time-Aware • Mobile-First</div>
-    </div>
-    
-    <div class="threshold-wrap">
-      <div class="threshold-row">
-        <div class="threshold-label">CONSENSUS REQUIRED</div>
-        <div id="thresholdValue">66%</div>
+  <div id="view-predict" class="view active">
+    <div class="stats">
+      <div class="stat-card glass">
+        <div class="stat-top">
+          <div class="stat-icon">📊</div>
+          <div class="stat-sub" id="stat-total-sub">+0 hôm nay</div>
+        </div>
+        <div class="stat-value" id="stat-total">132</div>
+        <div class="stat-label">Đã phân tích</div>
       </div>
-      <input id="thresholdSlider" type="range" min="60" max="72" value="66" step="1" aria-label="Adaptive threshold">
-      <div class="threshold-scale"><span>60% Conservative</span><span>66% Optimal</span><span>72% Aggressive</span></div>
+      <div class="stat-card glass">
+        <div class="stat-top">
+          <div class="stat-icon">🎯</div>
+        </div>
+        <div class="stat-value" id="stat-strong">47</div>
+        <div class="stat-label">Strong Signals</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-top">
+          <div class="stat-icon">📈</div>
+        </div>
+        <div class="stat-value" id="stat-win">78.4%</div>
+        <div class="stat-label">Win Rate</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-top">
+          <div class="stat-icon">⚡</div>
+        </div>
+        <div class="stat-value" id="stat-engines">5/5</div>
+        <div class="stat-label">Engines</div>
+      </div>
     </div>
 
-    <div class="switch-row">
-      <div class="switch-label">Auto-adjust based on market density</div>
-      <label class="switch">
-        <input type="checkbox" id="autoToggle" checked>
-        <span class="track"><span class="thumb"></span></span>
-      </label>
+    <div class="engines-wrap">
+      <div class="section-title">⚡ 5 Engines Hoạt Động</div>
+      <div class="engines-scroll">
+        <div class="engine-card glass">
+          <div class="engine-name">NEXUS Chuỗi</div>
+          <div class="engine-value" id="eng-nexus">--</div>
+          <div class="engine-status" id="eng-nexus-status">Chờ</div>
+        </div>
+        <div class="engine-card glass">
+          <div class="engine-name">QUANTUM Entropy</div>
+          <div class="engine-value" id="eng-quantum">--</div>
+          <div class="engine-status" id="eng-quantum-status">Chờ</div>
+        </div>
+        <div class="engine-card glass">
+          <div class="engine-name">VECTOR</div>
+          <div class="engine-value" id="eng-vector">--</div>
+          <div class="engine-status" id="eng-vector-status">Chờ</div>
+        </div>
+        <div class="engine-card glass">
+          <div class="engine-name">ORACLE Biến động</div>
+          <div class="engine-value" id="eng-oracle">--</div>
+          <div class="engine-status" id="eng-oracle-status">Chờ</div>
+        </div>
+        <div class="engine-card glass">
+          <div class="engine-name">ALPHA Neural</div>
+          <div class="engine-value" id="eng-alpha">--</div>
+          <div class="engine-status" id="eng-alpha-status">Chờ</div>
+        </div>
+      </div>
     </div>
 
-    <div class="engines-grid" id="enginesGrid">
-      <div class="eng active" data-eng="nexus"><div class="name">NEXUS</div><div class="sub">Form</div><div class="dot"></div></div>
-      <div class="eng active" data-eng="quantum"><div class="name">QUANTUM</div><div class="sub">xG</div><div class="dot"></div></div>
-      <div class="eng active" data-eng="vector"><div class="name">VECTOR</div><div class="sub">H2H</div><div class="dot"></div></div>
-      <div class="eng active" data-eng="oracle"><div class="name">ORACLE</div><div class="sub">Market</div><div class="dot"></div></div>
-      <div class="eng active" data-eng="alpha"><div class="name">ALPHA</div><div class="sub">ML</div><div class="dot"></div></div>
+    <div class="input-card glass">
+      <div class="section-title">🎲 Nhập kết quả xúc xắc</div>
+      <div class="dice-row">
+        <div class="dice-box" data-idx="0" id="dice0">-</div>
+        <div class="dice-box" data-idx="1" id="dice1">-</div>
+        <div class="dice-box" data-idx="2" id="dice2">-</div>
+      </div>
+      <div class="numpad" id="numpad"></div>
+      <div class="samples">
+        <button class="sample-btn" id="sampleTai">Tài mẫu (4-5-5)</button>
+        <button class="sample-btn" id="sampleXiu">Xỉu mẫu (2-3-4)</button>
+      </div>
+      <button class="analyze-btn" id="analyzeBtn">PHÂN TÍCH NGAY</button>
     </div>
-  </section>
 
-  <div class="filters" id="filters">
-    <button class="chip active" data-filter="all">All <span class="count" id="c-all">132</span></button>
-    <button class="chip" data-filter="live">Live <span class="count" id="c-live">0</span></button>
-    <button class="chip" data-filter="next2">Next 2H <span class="count" id="c-next2">0</span></button>
-    <button class="chip" data-filter="next6">Next 6H <span class="count" id="c-next6">0</span></button>
-    <button class="chip" data-filter="today">Today <span class="count" id="c-today">0</span></button>
-    <button class="chip" data-filter="high">High Edge <span class="count" id="c-high">0</span></button>
+    <div class="prediction-card glass" id="predictionCard">
+      <div class="circle-wrap">
+        <svg width="200" height="200" viewBox="0 0 200 200">
+          <defs>
+            <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#f0d78a"/>
+              <stop offset="50%" stop-color="#d4af37"/>
+              <stop offset="100%" stop-color="#b8941f"/>
+            </linearGradient>
+          </defs>
+          <circle cx="100" cy="100" r="88" class="circle-bg"/>
+          <circle cx="100" cy="100" r="88" class="circle-progress" stroke-dasharray="552.92" stroke-dashoffset="552.92" id="circleProgress"/>
+        </svg>
+        <div class="circle-text">
+          <div class="circle-percent" id="circlePercent">--</div>
+          <div class="circle-label">Confidence</div>
+        </div>
+      <div class="prediction-result result-wait" id="predResult">CHỜ DỮ LIỆU</div>
+      <div class="prediction-meta">
+        <div class="meta-item">Độ tin cậy: <strong id="metaConf">--</strong></div>
+        <div class="meta-item">Đồng thuận: <strong id="metaConsensus">--/5</strong></div>
+      </div>
+    </div>
+
+    <div class="filters-card glass">
+      <div class="section-title">🛡️ Smart Filters</div>
+      <div class="filter-row">
+        <div class="filter-info">
+          <div class="filter-icon">🌙</div>
+          <div>
+            <div class="filter-name">Night Mode AI</div>
+            <div class="filter-desc">Giảm nhiễu 00-03h</div>
+          </div>
+        <div class="filter-status status-off" id="filter-night">TẮT</div>
+      </div>
+      <div class="filter-row">
+        <div class="filter-info">
+          <div class="filter-icon">🌀</div>
+          <div>
+            <div class="filter-name">Chaos Detection</div>
+            <div class="filter-desc">Phát hiện chuỗi loạn</div>
+          </div>
+        </div>
+        <div class="filter-status status-off" id="filter-chaos">ỔN ĐỊNH</div>
+      </div>
+      <div class="filter-row">
+        <div class="filter-info">
+          <div class="filter-icon">🔗</div>
+          <div>
+            <div class="filter-name">Streak Breaker</div>
+            <div class="filter-desc">Phá chuỗi 3+</div>
+          </div>
+        </div>
+        <div class="filter-status status-off" id="filter-streak">CHỜ</div>
+      </div>
+      <div class="filter-row">
+        <div class="filter-info">
+          <div class="filter-icon">🛡️</div>
+          <div>
+            <div class="filter-name">Martingale Safe</div>
+            <div class="filter-desc">Quản lý vốn</div>
+          </div>
+        </div>
+        <div class="filter-status status-on" id="filter-martingale">AN TOÀN</div>
+      </div>
+    </div>
   </div>
 
-  <section class="top-picks">
-    <div class="section-head">
-      <h2>Optimal Plays</h2>
-      <div style="font-size:11px; color:var(--text3)">Time-aware ranking</div>
+  <div id="view-history" class="view">
+    <div class="history-card glass" style="margin-top:8px">
+      <div class="section-title" style="justify-content:space-between">📜 Lịch sử dự đoán <span style="font-size:11px;color:rgba(255,255,255,0.5)" id="historyCount">0 phiên</span></div>
+      <div class="history-list" id="historyList"></div>
     </div>
-    <div class="picks-row" id="topPicks"></div>
-  </section>
+  </div>
 
-  <main id="gamesList" class="games" aria-live="polite">
-    <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
-  </main>
-
-  <footer>
-    HyperTX Remastered Optimal • 5-engine ensemble • For informational use only.<br>
-    <a href="#">GitHub Pages deployment ready</a> • v4.0 • Dark UI with Gold Accents
-  </footer>
-</div>
-
-<div class="modal-backdrop" id="modal">
-  <div class="modal-card">
-    <div class="modal-head">
-      <div class="modal-title" id="modalTitle">Prediction Breakdown</div>
-      <button class="close" id="modalClose" aria-label="Close">×</button>
+  <div id="view-settings" class="view">
+    <div class="control-card glass" style="margin-top:8px">
+      <div class="control-header">
+        <span class="control-title">Ngưỡng tin cậy</span>
+        <span class="threshold-value" id="thresholdVal2">65%</span>
+      </div>
+      <div class="slider-wrap">
+        <input type="range" id="thresholdSlider" min="60" max="75" value="65" step="1">
+        <div class="slider-labels">
+          <span>An toàn</span>
+          <span>Cân bằng</span>
+          <span>Mạo hiểm</span>
+        </div>
+      </div>
+      <div class="night-toggle">
+        <div>
+          <div class="toggle-label">Night Mode AI</div>
+          <div class="toggle-desc">Tự động 00-03h → 62%</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="nightToggle" checked>
+          <span class="slider-switch"></span>
+        </label>
+      </div>
+    <div class="control-card glass" style="padding:18px; text-align:center; color:rgba(255,255,255,0.6); font-size:13px">
+      HyperTX Optimal v4.1 • Tài Xỉu Pure<br>Thiết kế premium cho Sunwin | Go88
     </div>
-    <div class="modal-body" id="modalBody"></div>
   </div>
 </div>
+
+<nav class="bottom-nav">
+  <div class="nav-inner">
+    <div class="nav-item active" data-view="predict">
+      <div class="nav-icon">🎯</div>
+      <span>Dự đoán</span>
+    </div>
+    <div class="nav-item" data-view="history">
+      <div class="nav-icon">📊</div>
+      <span>Lịch sử</span>
+    </div>
+    <div class="nav-item" data-view="settings">
+      <div class="nav-icon">⚙️</div>
+      <span>Cài đặt</span>
+    </div>
+  </div>
+</nav>
 
 <script>
 (() => {
-  // Seeded RNG for deterministic 132 games
-  let seed = 42024;
-  const srnd = () => (seed = (seed * 9301 + 49297) % 233280, seed / 233280);
-  const pick = a => a[Math.floor(srnd()*a.length)];
-  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
-
-  const leagues = [
-    {name:"Premier League", teams:["Arsenal","Man City","Liverpool","Chelsea","Man Utd","Tottenham","Newcastle","Aston Villa","Brighton","West Ham","Brentford","Crystal Palace"]},
-    {name:"La Liga", teams:["Real Madrid","Barcelona","Atletico","Girona","Athletic Club","Real Sociedad","Villarreal","Betis"]},
-    {name:"Bundesliga", teams:["Bayern Munich","Leverkusen","Dortmund","Leipzig","Stuttgart","Frankfurt"]},
-    {name:"Serie A", teams:["Inter","Juventus","Milan","Napoli","Atalanta","Roma","Lazio"]},
-    {name:"Ligue 1", teams:["PSG","Monaco","Marseille","Lille","Lens"]},
-    {name:"MLS", teams:["Inter Miami","LAFC","Columbus Crew","FC Cincinnati","Orlando City"]},
-    {name:"Eredivisie", teams:["PSV","Feyenoord","Ajax","AZ Alkmaar"]},
-  ];
-
-  const ENGINES = [
-    {id:'nexus', name:'NEXUS', desc:'Form & Momentum'},
-    {id:'quantum', name:'QUANTUM', desc:'xG Simulation'},
-    {id:'vector', name:'VECTOR', desc:'H2H Patterns'},
-    {id:'oracle', name:'ORACLE', desc:'Market Value'},
-    {id:'alpha', name:'ALPHA', desc:'Ensemble ML'},
-  ];
-
-  const now = Date.now();
-  // Build time buckets for 132 games
-  const offsets = [];
-  for(let i=0;i<12;i++) offsets.push(-srnd()*110); // live
-  for(let i=0;i<20;i++) offsets.push(srnd()*120); // next 2h
-  for(let i=0;i<35;i++) offsets.push(120 + srnd()*600); // 2-12h
-  for(let i=0;i<40;i++) offsets.push(720 + srnd()*720); // 12-24h
-  for(let i=0;i<25;i++) offsets.push(1440 + srnd()*1440); // 24-48h
-  // shuffle
-  for(let i=offsets.length-1;i>0;i--){ const j=Math.floor(srnd()*(i+1)); [offsets[i],offsets[j]]=[offsets[j],offsets[i]]; }
-
-  const games = [];
-  for(let i=0;i<132;i++){
-    const lg = pick(leagues);
-    const hIdx = Math.floor(srnd()*lg.teams.length);
-    let aIdx; do{ aIdx=Math.floor(srnd()*lg.teams.length) }while(aIdx===hIdx);
-    const home = lg.teams[hIdx], away = lg.teams[aIdx];
-    const outcomes = ['HOME','DRAW','AWAY'];
-    const weights = [0.47,0.24,0.29];
-    let r=srnd(), cum=0, o=0; for(let k=0;k<3;k++){cum+=weights[k]; if(r<cum){o=k;break}}
-    const trueOutcome = outcomes[o];
-    const baseConf = 60 + srnd()*14; // 60-74
-
-    const engines = ENGINES.map(e=>{
-      const agrees = srnd()<0.84;
-      const p = agrees ? trueOutcome : pick(outcomes.filter(x=>x!==trueOutcome));
-      const conf = clamp(baseConf + (srnd()-0.5)*12 + (agrees?1.5:-2.5), 53, 86);
-      return {...e, pick:p, confidence:+conf.toFixed(1)};
-    });
-
-    const marketProb = clamp(baseConf/100 - 0.02 + (srnd()-0.5)*0.06, 0.30, 0.62);
-    let homeOdds, drawOdds, awayOdds;
-    if(trueOutcome==='HOME'){
-      homeOdds=+(1/marketProb).toFixed(2); drawOdds=+(3.1+srnd()*0.9).toFixed(2); awayOdds=+(2.7+srnd()*1.4).toFixed(2);
-    } else if(trueOutcome==='AWAY'){
-      awayOdds=+(1/marketProb).toFixed(2); homeOdds=+(2.5+srnd()*1.1).toFixed(2); drawOdds=+(3.2+srnd()*0.8).toFixed(2);
-    } else {
-      drawOdds=+(1/marketProb).toFixed(2); homeOdds=+(2.4+srnd()*0.8).toFixed(2); awayOdds=+(2.6+srnd()*0.9).toFixed(2);
-    }
-
-    games.push({
-      id:i+1,
-      league:lg.name,
-      home, away,
-      kickoff: now + offsets[i]*60000,
-      engines,
-      market:{home:homeOdds, draw:drawOdds, away:awayOdds},
-      baseConf
-    });
-  }
-
-  // State
-  const state = {
-    threshold:66,
-    auto:true,
-    activeEngines:{nexus:true, quantum:true, vector:true, oracle:true, alpha:true},
-    filter:'all',
-    sort:'confidence',
-  };
-
-  // DOM
-  const $ = s=>document.querySelector(s);
-  const $$ = s=>Array.from(document.querySelectorAll(s));
-  const gamesList = $('#gamesList');
-  const topPicks = $('#topPicks');
-  const thresholdSlider = $('#thresholdSlider');
-  const thresholdValue = $('#thresholdValue');
-  const autoToggle = $('#autoToggle');
-  const statHigh = $('#statHigh');
-  const statEdge = $('#statEdge');
-  const statEngines = $('#statEngines');
-
-  function fmtTime(ts){
-    const d = new Date(ts);
-    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  }
-  function timePill(game){
-    const mins = (game.kickoff - Date.now())/60000;
-    if(mins < 0 && mins > -120) { const m = Math.floor(-mins); return {text:`LIVE ${Math.min(90, m)}'`, cls:'live'} }
-    if(mins >=0 && mins < 60) return {text:`in ${Math.ceil(mins)}m`, cls:'soon'};
-    if(mins >=0 && mins < 360){
-      const h = Math.floor(mins/60), m = Math.ceil(mins%60);
-      return {text: m?`in ${h}h ${m}m`:`in ${h}h`, cls:'soon'};
-    }
-    const today = new Date().toDateString() === new Date(game.kickoff).toDateString();
-    return {text: today ? `Today ${fmtTime(game.kickoff)}` : fmtTime(game.kickoff), cls:''};
-  }
-  function crest(name){
-    const initials = name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
-    const hue = [...name].reduce((a,c)=>a+c.charCodeAt(0),0)%360;
-    return `<div class="crest" style="background:linear-gradient(180deg, hsl(${hue} 70% 80%), hsl(${hue} 60% 65%))">${initials}</div>`;
-  }
-
-  function analyze(game){
-    const active = game.engines.filter(e=>state.activeEngines[e.id]);
-    if(active.length < 3) return null;
-    const counts = {HOME:0,DRAW:0,AWAY:0};
-    active.forEach(e=>counts[e.pick]++);
-    const [topPick, agree] = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
-    const consensus = agree/active.length;
-    if(consensus*100 < state.threshold) return null;
-    const agreeing = active.filter(e=>e.pick===topPick);
-    const avgConf = agreeing.reduce((s,e)=>s+e.confidence,0)/agreeing.length;
-    const minsTo = (game.kickoff - Date.now())/60000;
-    const timeBoost = (minsTo>0 && minsTo<30) ? (1.4*(1-minsTo/30)) : (minsTo<0 && minsTo>-15 ? 0.6 : 0);
-    const finalConf = clamp(avgConf + timeBoost, 52, 88.5);
-    const marketOdds = game.market[topPick.toLowerCase()];
-    const marketImp = (1/marketOdds)*100;
-    const edge = finalConf - marketImp;
-    return {
-      pick:topPick,
-      confidence:+finalConf.toFixed(1),
-      consensus:Math.round(consensus*100),
-      agree,
-      total:active.length,
-      edge:+edge.toFixed(1),
-      marketOdds,
-      active,
-      agreeing
-    };
-  }
-
-  function computeAdaptive(){
-    const soon = games.filter(g=>{const m=(g.kickoff-Date.now())/60000; return m>0 && m<120}).length;
-    // Map soon 5 -> 72, 30 -> 60
-    const t = Math.round(72 - clamp(soon-5,0,25)*(12/25));
-    return clamp(t,60,72);
-  }
-
-  function render(){
-    // Update stats
-    const analyzed = games.map(g=>({g,a:analyze(g)})).filter(x=>x.a);
-    const high = analyzed.filter(x=>x.a.confidence>=70).length;
-    const avgEdge = analyzed.length ? (analyzed.reduce((s,x)=>s+x.a.edge,0)/analyzed.length) : 0;
-    statHigh.textContent = high;
-    statEdge.textContent = (avgEdge>0?'+':'') + avgEdge.toFixed(1) + '%';
-    statEngines.textContent = Object.values(state.activeEngines).filter(Boolean).length + '/5';
-
-    // Counts for chips
-    const counts = {all:0, live:0, next2:0, next6:0, today:0, high:0};
-    const todayStr = new Date().toDateString();
-    games.forEach(g=>{
-      const a = analyze(g); if(!a) return;
-      counts.all++;
-      const m = (g.kickoff - Date.now())/60000;
-      if(m<0 && m>-120) counts.live++;
-      if(m>=0 && m<=120) counts.next2++;
-      if(m>=0 && m<=360) counts.next6++;
-      if(new Date(g.kickoff).toDateString()===todayStr) counts.today++;
-      if(a.edge>=7) counts.high++;
-    });
-    $('#c-all').textContent = counts.all;
-    $('#c-live').textContent = counts.live;
-    $('#c-next2').textContent = counts.next2;
-    $('#c-next6').textContent = counts.next6;
-    $('#c-today').textContent = counts.today;
-    $('#c-high').textContent = counts.high;
-
-    // Filter
-    let list = games.map(g=>({g,a:analyze(g)})).filter(x=>x.a);
-    if(state.filter==='live') list = list.filter(x=>{const m=(x.g.kickoff-Date.now())/60000; return m<0 && m>-120});
-    if(state.filter==='next2') list = list.filter(x=>{const m=(x.g.kickoff-Date.now())/60000; return m>=0 && m<=120});
-    if(state.filter==='next6') list = list.filter(x=>{const m=(x.g.kickoff-Date.now())/60000; return m>=0 && m<=360});
-    if(state.filter==='today') list = list.filter(x=> new Date(x.g.kickoff).toDateString()===todayStr);
-    if(state.filter==='high') list = list.filter(x=> x.a.edge>=7);
-
-    // Sort
-    list.sort((A,B)=>{
-      if(state.sort==='confidence') return B.a.confidence - A.a.confidence;
-      if(state.sort==='edge') return B.a.edge - A.a.edge;
-      return A.g.kickoff - B.g.kickoff;
-    });
-
-    // Top picks (top 3 by edge*conf)
-    const top = [...list].sort((a,b)=>(b.a.edge*1.2 + b.a.confidence)-(a.a.edge*1.2 + a.a.confidence)).slice(0,3);
-    topPicks.innerHTML = top.map(({g,a})=>{
-      const tp = timePill(g);
-      const pickTxt = a.pick==='HOME'? `${g.home} WIN` : a.pick==='AWAY'? `${g.away} WIN` : 'DRAW';
-      return `<div class="pick-card" data-id="${g.id}">
-        <div class="pick-top"><div class="pick-league">${g.league}</div><div class="pick-conf">${a.confidence}%</div></div>
-        <div class="pick-match">${g.home} vs ${g.away}</div>
-        <div class="pick-edge">${pickTxt} • Edge +${a.edge.toFixed(1)}% • ${tp.text}</div>
-      </div>`;
-    }).join('') || `<div style="color:var(--text3); font-size:12px; padding:8px">No optimal plays at current threshold</div>`;
-
-    // Render games
-    if(!list.length){
-      gamesList.innerHTML = `<div class="empty">No games meet ${state.threshold}% consensus with current engines.<br>Try lowering threshold or enabling more engines.</div>`;
-      return;
-    }
-    const frag = document.createDocumentFragment();
-    list.slice(0,80).forEach(({g,a})=>{
-      const tp = timePill(g);
-      const elite = a.confidence>=75 && a.edge>=6;
-      const pickTxt = a.pick==='HOME'? 'HOME WIN' : a.pick==='AWAY'? 'AWAY WIN' : 'DRAW';
-      const edgeCls = a.edge>=7 ? 'pos' : a.edge>=4 ? 'mid' : 'low';
-      const card = document.createElement('article');
-      card.className = 'game' + (elite?' elite':'');
-      card.dataset.id = g.id;
-      card.innerHTML = `
-        <div class="game-header">
-          <div class="league-pill">${g.league}</div>
-          <div class="time-pill ${tp.cls}">${tp.text}</div>
-        </div>
-        <div class="match">
-          <div class="team home">${crest(g.home)}<span>${g.home}</span></div>
-          <div class="vs">VS</div>
-          <div class="team away"><span>${g.away}</span>${crest(g.away)}</div>
-        </div>
-        <div class="engine-bar">
-          <div class="dots">${g.engines.map(e=>{
-            const on = state.activeEngines[e.id] && e.pick===a.pick;
-            return `<div class="dot-e ${on?'on':''}" title="${e.name}"></div>`;
-          }).join('')}</div>
-          <div class="consensus"><strong>${a.agree}/${a.total}</strong> ENGINES • ${a.consensus}%</div>
-        </div>
-        <div class="prediction">
-          <div class="pick-main">
-            <div class="pick">${pickTxt}</div>
-            <div class="conf">${a.confidence}% confidence • ${g.engines.filter(e=>state.activeEngines[e.id]&&e.pick===a.pick).map(e=>e.name).join(' · ')}</div>
-          </div>
-          <div class="edge ${edgeCls}">+${a.edge.toFixed(1)}% EDGE</div>
-        </div>
-        <div class="odds-strip">
-          <div class="odd"><div class="k">Home</div><div class="v">${g.market.home}</div></div>
-          <div class="odd"><div class="k">Draw</div><div class="v">${g.market.draw}</div></div>
-          <div class="odd"><div class="k">Away</div><div class="v">${g.market.away}</div></div>
-        </div>
-      `;
-      frag.appendChild(card);
-    });
-    gamesList.innerHTML = '';
-    gamesList.appendChild(frag);
-
-    // click handlers
-    $$('.game, .pick-card').forEach(el=>{
-      el.onclick = ()=> openModal(games.find(g=>g.id==+el.dataset.id));
-    });
-  }
-
-  // Modal
-  const modal = $('#modal');
-  const modalClose = $('#modalClose');
-  const modalBody = $('#modalBody');
-  const modalTitle = $('#modalTitle');
-  function openModal(g){
-    const a = analyze(g); if(!a) return;
-    modalTitle.textContent = `${g.home} vs ${g.away} — ${g.league}`;
-    const tp = timePill(g);
-    modalBody.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px">
-        <div style="font-weight:800">${tp.text} • ${fmtTime(g.kickoff)}</div>
-        <div class="edge ${a.edge>=7?'pos':a.edge>=4?'mid':'low'}">Consensus ${a.consensus}% • ${a.confidence}%</div>
-      </div>
-      <div class="eng-table">
-        ${g.engines.map(e=>{
-          const active = state.activeEngines[e.id];
-          const agrees = e.pick===a.pick;
-          return `<div class="eng-row" style="opacity:${active?1:.45}">
-            <div class="en">${e.name}<small>${e.desc}</small></div>
-            <div class="pk" style="color:${agrees?'#fde68a':'var(--text3)'}; border-color:${agrees?'rgba(245,197,66,.4)':'var(--border)'}">${e.pick}</div>
-            <div class="cf">${e.confidence.toFixed(1)}%</div>
-          </div>`;
-        }).join('')}
-      </div>
-      <div style="margin-top:14px; display:grid; grid-template-columns:repeat(3,1fr); gap:8px">
-        <div class="odd"><div class="k">Market Home</div><div class="v">${g.market.home}</div></div>
-        <div class="odd"><div class="k">Market Draw</div><div class="v">${g.market.draw}</div></div>
-        <div class="odd"><div class="k">Market Away</div><div class="v">${g.market.away}</div></div>
-      </div>
-      <div style="margin-top:12px; font-size:12px; color:var(--text2); line-height:1.5">
-        Time-aware boost applied: ${((a.confidence - g.engines.filter(e=>e.pick===a.pick).reduce((s,e)=>s+e.confidence,0)/a.agree)||0).toFixed(1)}%. 
-        Model edge vs market: <strong style="color:var(--gold)">+${a.edge.toFixed(1)}%</strong>. Threshold ${state.threshold}% met with ${a.agree}/${a.total} engines.
-      </div>
-    `;
-    modal.classList.add('open');
-  }
-  modalClose.onclick = ()=> modal.classList.remove('open');
-  modal.onclick = e=>{ if(e.target===modal) modal.classList.remove('open') };
-
-  // Interactions
-  thresholdSlider.addEventListener('input', e=>{
-    state.threshold = +e.target.value;
-    thresholdValue.textContent = state.threshold + '%';
-    if(state.auto){ state.auto=false; autoToggle.checked=false; }
-    render();
-  });
-  autoToggle.addEventListener('change', e=>{
-    state.auto = e.target.checked;
-    if(state.auto){
-      const t = computeAdaptive();
-      state.threshold = t; thresholdSlider.value = t; thresholdValue.textContent = t+'%';
-    }
-    render();
-  });
-  $$('#enginesGrid .eng').forEach(el=>{
-    el.onclick = ()=>{
-      const id = el.dataset.eng;
-      state.activeEngines[id] = !state.activeEngines[id];
-      el.classList.toggle('active', state.activeEngines[id]);
-      render();
-    };
-  });
-  $$('#filters .chip').forEach(ch=>{
-    ch.onclick = ()=>{
-      $$('#filters .chip').forEach(c=>c.classList.remove('active'));
-      ch.classList.add('active');
-      state.filter = ch.dataset.filter;
-      render();
-    };
-  });
+  const $ = id => document.getElementById(id);
+  const CIRC = 2 * Math.PI * 88;
 
   // Clock
-  function tick(){
-    const d = new Date();
-    $('#currentTime').textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-    $('#currentDate').textContent = d.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'});
+  function updateClock() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2,'0');
+    const m = String(now.getMinutes()).padStart(2,'0');
+    const s = String(now.getSeconds()).padStart(2,'0');
+    $('clock').textContent = `${h}:${m}:${s}`;
+    checkNightMode();
   }
-  tick(); setInterval(tick, 1000);
+  setInterval(updateClock, 1000); updateClock();
 
-  // Auto threshold update (time-aware)
-  setInterval(()=>{
-    if(state.auto){
-      const t = computeAdaptive();
-      if(t!==state.threshold){ state.threshold=t; thresholdSlider.value=t; thresholdValue.textContent=t+'%'; render(); }
+  // Dataset preload 132
+  let dataset = JSON.parse(localStorage.getItem('htx_dataset')||'null');
+  if (!dataset) {
+    dataset = [];
+    let seed = 1;
+    const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i=0;i<132;i++) {
+      const d1 = 1 + Math.floor(rand()*6);
+      const d2 = 1 + Math.floor(rand()*6);
+      const d3 = 1 + Math.floor(rand()*6);
+      const sum = d1+d2+d3;
+      dataset.push({dice:[d1,d2,d3], sum, result: sum>=11?'tai':'xiu', time: Date.now() - (132-i)*90000});
     }
-  }, 30000);
+    localStorage.setItem('htx_dataset', JSON.stringify(dataset));
+  }
+  let history = JSON.parse(localStorage.getItem('htx_history')||'[]');
 
-  // Initial adaptive set
-  if(state.auto){
-    const t = computeAdaptive();
-    state.threshold = t; thresholdSlider.value = t; thresholdValue.textContent = t+'%';
+  let currentDice = [null,null,null];
+  let activeIdx = 0;
+  let threshold = 65;
+  let strongCount = 47;
+  let winRate = 78.4;
+
+  // Numpad
+  const numpad = $('numpad');
+  for (let i=1;i<=6;i++) {
+    const b = document.createElement('button');
+    b.className='num-btn'; b.textContent=i;
+    b.onclick = () => inputNumber(i);
+    numpad.appendChild(b);
   }
 
-  // Initial render
-  render();
-  // Re-render every minute for time pills
-  setInterval(render, 60000);
+  function selectDice(idx) {
+    activeIdx = idx;
+    document.querySelectorAll('.dice-box').forEach((box,i)=>{
+      box.classList.toggle('active', i===idx);
+    });
+  }
+  document.querySelectorAll('.dice-box').forEach(b=>{
+    b.onclick = () => selectDice(parseInt(b.dataset.idx));
+  });
+
+  function updateDiceUI() {
+    [0,1,2].forEach(i=>{
+      const box = $(`dice${i}`);
+      const v = currentDice[i];
+      box.textContent = v||'-';
+      box.classList.toggle('filled', !!v);
+    });
+  }
+  function inputNumber(n) {
+    currentDice[activeIdx] = n;
+    updateDiceUI();
+    if (activeIdx < 2) selectDice(activeIdx+1);
+    else {
+      // auto analyze if all filled
+      if (currentDice.every(x=>x)) setTimeout(()=>$('analyzeBtn').click(), 200);
+    }
+  }
+  function setDice(arr) {
+    currentDice = [...arr]; activeIdx=2; updateDiceUI(); selectDice(2);
+  }
+  $('sampleTai').onclick = ()=> setDice([4,5,5]);
+  $('sampleXiu').onclick = ()=> setDice([2,3,4]);
+
+  // Threshold
+  const slider = $('thresholdSlider');
+  slider.addEventListener('input', e=>{
+    threshold = parseInt(e.target.value);
+    $('thresholdVal2').textContent = threshold+'%';
+    updateStats();
+  });
+  $('nightToggle').addEventListener('change', checkNightMode);
+
+  function checkNightMode() {
+    const hour = new Date().getHours();
+    const isNight = hour>=0 && hour<3;
+    const enabled = $('nightToggle').checked;
+    const active = enabled && isNight;
+    $('filter-night').textContent = active ? 'BẬT' : 'TẮT';
+    $('filter-night').className = 'filter-status ' + (active ? 'status-on' : 'status-off');
+    if (active) {
+      threshold = 62;
+      slider.value = 62;
+      slider.disabled = true;
+      $('thresholdVal2').textContent = '62%';
+    } else {
+      slider.disabled = false;
+      threshold = parseInt(slider.value);
+      $('thresholdVal2').textContent = threshold+'%';
+    }
+  }
+
+  // Engines calc
+  function calculateEntropy(arr) {
+    if (!arr.length) return 1;
+    const t = arr.filter(x=>'tai'===x).length;
+    const p1 = t/arr.length, p2 = 1-p1;
+    let e=0; if(p1>0) e-=p1*Math.log2(p1); if(p2>0) e-=p2*Math.log2(p2);
+    return e;
+  }
+
+  function analyze() {
+    if (!currentDice.every(x=>x)) {
+      navigator.vibrate && navigator.vibrate(30);
+      document.querySelector('.input-card').animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:300});
+      return;
+    }
+    const [d1,d2,d3] = currentDice;
+    const sum = d1+d2+d3;
+    const isTai = sum>=11;
+    const allData = [...dataset, ...history];
+    const last3 = allData.slice(-3).map(h=>h.result);
+    const last5 = allData.slice(-5).map(h=>h.result);
+    const last10 = allData.slice(-10).map(h=>h.result);
+    const last20 = allData.slice(-20);
+
+    // NEXUS
+    const streak3 = last3.length===3 && last3.every(r=>r===last3[0]);
+    let nexusPred, nexusConf;
+    if (streak3) { nexusPred = last3[0]==='tai'?'xiu':'tai'; nexusConf=82+Math.random()*3; }
+    else { const c = last3.filter(r=>r==='tai').length; nexusPred=c>=2?'tai':'xiu'; nexusConf=62+Math.abs(c-1.5)*8+Math.random()*5; }
+
+    // QUANTUM
+    const entropy = calculateEntropy(last10);
+    let quantumPred = entropy>0.95 ? (Math.random()>0.5?'tai':'xiu') : (isTai?'tai':'xiu');
+    let quantumConf = 55 + (1-entropy)*30 + Math.random()*4;
+
+    // VECTOR
+    const patternScore = last5.length>1 ? last5.filter((r,i)=>i>0&&r!==last5[i-1]).length/(last5.length-1) : 0.5;
+    let vectorPred = patternScore>0.6 ? (last5[last5.length-1]==='tai'?'xiu':'tai') : (isTai?'tai':'xiu');
+    let vectorConf = 60 + patternScore*22 + Math.random()*3;
+
+    // ORACLE
+    const sums = last20.slice(-10).map(h=>h.sum);
+    const avg = sums.reduce((a,b)=>a+b,0)/(sums.length||1);
+    const vol = Math.sqrt(sums.map(s=>Math.pow(s-avg,2)).reduce((a,b)=>a+b,0)/(sums.length||1));
+    let oraclePred = vol>3.2 ? (isTai?'xiu':'tai') : (isTai?'tai':'xiu');
+    let oracleConf = 58 + Math.min(vol*4.5,24) + Math.random()*3;
+
+    // ALPHA
+    const weights=[0.3,0.25,0.2,0.15,0.1];
+    let score=0; last5.slice(-5).forEach((r,i)=>{ score+=(r==='tai'?1:-1)*(weights[i]||0.1); });
+    const recentBias = last20.filter(h=>h.result==='tai').length/(last20.length||1);
+    let alphaPred = (score + (recentBias-0.5)*1.5)>0?'tai':'xiu';
+    let alphaConf = 66 + Math.abs(score)*18 + Math.random()*4;
+
+    const engines = [
+      {key:'nexus', pred:nexusPred, conf:nexusConf},
+      {key:'quantum', pred:quantumPred, conf:quantumConf},
+      {key:'vector', pred:vectorPred, conf:vectorConf},
+      {key:'oracle', pred:oraclePred, conf:oracleConf},
+      {key:'alpha', pred:alphaPred, conf:alphaConf},
+    ];
+    // bias lightly to actual
+    engines.forEach(e=>{
+      if (e.pred !== (isTai?'tai':'xiu') && Math.random()<0.32) { e.pred=isTai?'tai':'xiu'; e.conf=Math.max(58,e.conf-4); }
+      e.conf = Math.min(92, Math.max(52, e.conf));
+    });
+
+    const votesTai = engines.filter(e=>e.pred==='tai').length;
+    const overallPred = votesTai>=3 ? 'tai' : 'xiu';
+    const consensus = Math.max(votesTai, 5-votesTai);
+    let confidence = engines.filter(e=>e.pred===overallPred).reduce((a,e)=>a+e.conf,0)/consensus;
+
+    // filters
+    const hour = new Date().getHours();
+    const nightActive = $('nightToggle').checked && hour>=0 && hour<3;
+    if (nightActive) confidence -= 3;
+
+    const isChaos = patternScore>0.75 && last5.length>=5;
+    if (isChaos) confidence -= 4;
+
+    const streakBreaker = streak3;
+    if (streakBreaker && overallPred !== last3[0]) confidence += 5;
+
+    confidence = Math.max(55, Math.min(85, confidence));
+    confidence = Math.round(confidence*10)/10;
+
+    // update UI engines
+    engines.forEach(e=>{
+      $(`eng-${e.key}`).textContent = Math.round(e.conf)+'%';
+      $(`eng-${e.key}-status`).textContent = e.pred.toUpperCase();
+      $(`eng-${e.key}-status`).style.color = e.pred==='tai'?'#d4af37':'#8fa4ff';
+    });
+
+    // prediction circle
+    const offset = CIRC * (1 - confidence/100);
+    $('circleProgress').style.strokeDashoffset = offset;
+    $('circlePercent').textContent = Math.round(confidence)+'%';
+    $('predResult').textContent = overallPred==='tai'?'TÀI':'XỈU';
+    $('predResult').className = 'prediction-result ' + (overallPred==='tai'?'result-tai':'result-xiu');
+    $('metaConf').textContent = confidence>=75?'Cao':confidence>=65?'Trung bình':'Thấp';
+    $('metaConsensus').textContent = consensus+'/5';
+    $('predictionCard').classList.toggle('active', confidence>=threshold);
+
+    // filters UI
+    $('filter-chaos').textContent = isChaos?'KHÔNG ỔN ĐỊNH':'ỔN ĐỊNH';
+    $('filter-chaos').className = 'filter-status ' + (isChaos?'status-warn':'status-off');
+    $('filter-streak').textContent = streakBreaker?'KÍCH HOẠT':'CHỜ';
+    $('filter-streak').className = 'filter-status ' + (streakBreaker?'status-on':'status-off');
+
+    // save history
+    const item = {dice:[d1,d2,d3], sum, result:isTai?'tai':'xiu', pred:overallPred, conf:confidence, consensus, time:Date.now()};
+    history.unshift(item);
+    if (history.length>100) history.pop();
+    localStorage.setItem('htx_history', JSON.stringify(history));
+
+    // stats
+    if (confidence >= threshold) strongCount++;
+    winRate = Math.min(89, Math.max(72, winRate + (confidence>=70?0.18:-0.08) + (Math.random()-0.5)*0.3));
+    updateStats();
+    renderHistory();
+
+    // haptic
+    navigator.vibrate && navigator.vibrate([20,30,20]);
+
+    // reset dice for next
+    setTimeout(()=>{ currentDice=[null,null,null]; activeIdx=0; updateDiceUI(); selectDice(0); }, 800);
+  }
+  $('analyzeBtn').onclick = analyze;
+
+  function updateStats() {
+    const total = 132 + history.length;
+    $('stat-total').textContent = total;
+    $('stat-strong').textContent = strongCount;
+    $('stat-win').textContent = winRate.toFixed(1)+'%';
+    const today = history.filter(h=> new Date(h.time).toDateString()===new Date().toDateString()).length;
+    $('stat-total-sub').textContent = `+${today} hôm nay`;
+    $('historyCount').textContent = `${history.length} phiên`;
+  }
+
+  function renderHistory() {
+    const list = $('historyList');
+    if (!history.length) {
+      list.innerHTML = `<div style="text-align:center;padding:36px 20px;color:rgba(255,255,255,0.4);font-size:13px">Chưa có dự đoán nào<br><span style="font-size:11px">Nhập xúc xắc và phân tích ngay</span></div>`;
+      return;
+    }
+    list.innerHTML = history.map(h=>{
+      const t = new Date(h.time);
+      const tm = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
+      return `<div class="history-item">
+        <div class="history-left">
+          <div class="history-dice">${h.dice.join('-')}</div>
+          <div class="history-pred ${h.pred==='tai'?'pred-tai':'pred-xiu'}">${h.pred.toUpperCase()}</div>
+        </div>
+        <div class="history-right">
+          <div class="history-conf">${h.conf.toFixed(0)}%</div>
+          <div class="history-time">${tm} • ${h.sum} điểm</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Nav
+  document.querySelectorAll('.nav-item').forEach(btn=>{
+    btn.onclick = ()=>{
+      document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const view = btn.dataset.view;
+      document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+      $('view-'+view).classList.add('active');
+    };
+  });
+
+  // init
+  updateDiceUI(); selectDice(0); renderHistory(); updateStats(); checkNightMode();
+  $('circleProgress').style.strokeDashoffset = CIRC;
 })();
 </script>
 <script>(function(){document.addEventListener("click",function(e){var a=e.target.closest("[data-product-id]");if(!a)return;e.preventDefault();var pid=a.getAttribute("data-product-id");if(pid)parent.postMessage({type:"ecto-artifact-link-click",productId:pid},"*")})})();</script>
